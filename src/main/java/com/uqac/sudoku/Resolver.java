@@ -1,14 +1,16 @@
 package com.uqac.sudoku;
 
+import org.sat4j.core.VecInt;
 import org.sat4j.pb.SolverFactory;
 import org.sat4j.reader.DimacsReader;
 import org.sat4j.reader.Reader;
+import org.sat4j.specs.ContradictionException;
+import org.sat4j.specs.IProblem;
 import org.sat4j.specs.ISolver;
+import org.sat4j.specs.TimeoutException;
 import stev.booleans.*;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 public class Resolver {
     /**
@@ -43,9 +45,6 @@ public class Resolver {
      * Thomas Metral :   METT22040000
      */
     public static void main(String[] args) {
-        ISolver solver = SolverFactory.newDefault();
-        Reader reader = new DimacsReader(solver);
-
         /* Variable Propositionnelle */
         /**
          *  1 - La case X doit contenir un chiffre entre 1 et 9
@@ -62,8 +61,6 @@ public class Resolver {
          * 1 -2 3
          * 2 -3 4 5
          */
-
-        //Comme j'ai mis le "" au début ça concatène et ça additionne pas
 
         // ROW COLUMN NUMBER || 0 pour NUMBER => case vide
         // 110 111 112 113 114 115 116 117 118 119
@@ -106,7 +103,7 @@ public class Resolver {
                     List<Not> notsRow = new ArrayList<>();
                     List<Not> notsColumn = new ArrayList<>();
 
-                    for (int count = 1; count < 10; count++) {
+                    for (int count = 0; count < 9; count++) {
                         // Une seule fois par row
                         if (count != column) {
                             Not notSameNbRow = new Not(propVars[row][count][number]);
@@ -119,24 +116,102 @@ public class Resolver {
                         }
                     }
                     PropositionalVariable currentVar = propVars[row][column][number];
+
                     And rowAnds = new And(notsRow.toArray(new Not[0]));
                     Equivalence rowEq = new Equivalence(currentVar, rowAnds);
                     And colAnds = new And(notsColumn.toArray(new Not[0]));
                     Equivalence colEq = new Equivalence(currentVar, colAnds);
 
+                    cnfFormulas.add(BooleanFormula.toCnf(rowEq));
+                    cnfFormulas.add(BooleanFormula.toCnf(colEq));
+
+                    // Check 3x3 blocks
+                    int bloc_row_index = row - (row % 3);
+                    int bloc_col_index = column - (column % 3);
+                    List<Not> notsBlock = new ArrayList<>();
+                    for (int bloc_row = bloc_row_index; bloc_row < bloc_row_index + 3; bloc_row++) {
+                        for (int bloc_col = bloc_col_index; bloc_col < bloc_col_index + 3; bloc_col++) {
+                            if (bloc_row != row || bloc_col != column){
+                                notsBlock.add(new Not(propVars[bloc_row][bloc_col][number]));
+                            }
+                        }
+                    }
+                    And blockAnds = new And(notsBlock.toArray(new Not[0]));
+                    Equivalence blockEq = new Equivalence(currentVar, blockAnds);
+
+                    cnfFormulas.add(BooleanFormula.toCnf(blockEq));
                 }
             }
         }
 
-        List<PropositionalVariable> blocV = new ArrayList<>();
-        for (int i = 0; i < 9; i++) {
-            blocV.add(new PropositionalVariable("b"+i));
-        }
-        // Une ligne n'a pas de cases vides && Aucun chiffre pareil
+        // Aucune cellule vide
 
-        // Une colonne n'a pas de cases vides && Aucun chiffre pareil
+        // Aucun chiffre pareil sur la ligne
+
+        // Aucun chiffre pareil sur la colonne
 
         // Un bloc n'a pas de chiffre pareil
+
+
+        // Parseur input -> contraintes pour le solveur
+
+        // #26###81#3##7#8##64###5###7#5#1#7#9###39#51###4#3#2#5#1###3###25##2#4##9#38###46#
+
+        // Add the numbers of the grid as variables
+        String input_grid = args[0];
+        int i = 0;
+        for(char ch : input_grid.toCharArray()) {
+            int row = i / 9;
+            int col = i % 9;
+            String ch_str = ch + "";
+            if(!ch_str.equals("#")) {
+                int number = Integer.parseInt(ch_str);
+                cnfFormulas.add(propVars[row][col][number]);
+            }
+            i++;
+        }
+
+        BooleanFormula bigFormula = BooleanFormula.toCnf(new And(cnfFormulas.toArray(new BooleanFormula[0])));
+
+        // Create solver
+        ISolver solver = SolverFactory.newDefault();
+
+        solver.newVar(9*9*10);
+
+        int nbClauses = bigFormula.getClauses().length;
+        solver.setExpectedNumberOfClauses(nbClauses);
+
+        // System.exit(0);
+        // Add all clauses to the solver
+        for(int[] clause : bigFormula.getClauses()) {
+            try {
+                solver.addClause(new VecInt(clause));
+            } catch (ContradictionException e) {
+                e.printStackTrace();
+            }
+        }
+
+        IProblem problem = solver;
+        try {
+            if(problem.isSatisfiable()) {
+                System.out.println("Satisfiable !");
+                int[] model = problem.findModel();
+
+                Map<String, Integer> map = bigFormula.getVariablesMap();
+                Map<Integer, String> reverse = new HashMap<>();
+                map.forEach((key, value) -> reverse.put(value, key));
+
+                Map<String, Boolean> res = new HashMap<>();
+
+                Arrays.stream(model).forEach(var -> res.put(reverse.get(Math.abs(var)), var >= 0));
+
+                for (Map.Entry<String, Boolean> entry : res.entrySet()) {
+                    System.out.println(entry.getKey() + " -> " + entry.getValue());
+                }
+            }
+        } catch (TimeoutException e) {
+            e.printStackTrace();
+        }
 
     }
 }
